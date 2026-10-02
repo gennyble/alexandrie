@@ -2,13 +2,13 @@ use std::fmt::Formatter;
 
 use crate::db::models::Crate;
 use tantivy::schema::Schema;
-use tantivy::Document;
+use tantivy::TantivyDocument;
 
 use crate::error::Error;
 
 /// Represent a crate.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TantivyDocument {
+pub struct FtsDocument {
     id: i64,
     name: String,
     description: Option<String>,
@@ -16,7 +16,7 @@ pub struct TantivyDocument {
     categories: Vec<String>,
 }
 
-impl std::fmt::Display for TantivyDocument {
+impl std::fmt::Display for FtsDocument {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "id: {}, name: {}", self.id, self.name)?;
         if let Some(description) = &self.description {
@@ -41,7 +41,7 @@ impl std::fmt::Display for TantivyDocument {
     }
 }
 
-impl From<Crate> for TantivyDocument {
+impl From<Crate> for FtsDocument {
     fn from(value: Crate) -> Self {
         Self {
             id: value.id,
@@ -53,7 +53,7 @@ impl From<Crate> for TantivyDocument {
     }
 }
 
-impl TantivyDocument {
+impl FtsDocument {
     pub fn new(id: i64, name: String) -> Self {
         Self {
             id,
@@ -64,10 +64,10 @@ impl TantivyDocument {
         }
     }
 
-    pub fn try_into(self, schema: &Schema) -> Result<Document, Error> {
+    pub fn try_into(self, schema: &Schema) -> Result<TantivyDocument, Error> {
         // Can't implement From because I need to use a tuple to hold schema and both
         // tuple and Document are in another crate :-(
-        let mut document = Document::new();
+        let mut document = TantivyDocument::new();
 
         let id_field = schema.get_field(super::ID_FIELD_NAME)?;
         let name_field = schema.get_field(super::NAME_FIELD_NAME)?;

@@ -29,7 +29,7 @@ use crate::db::schema::*;
 use crate::db::Connection;
 use crate::db::DATETIME_FORMAT;
 use crate::error::{AlexError, ApiError, Error};
-use crate::fts::TantivyDocument;
+use crate::fts::FtsDocument;
 use crate::utils;
 use crate::utils::auth::api::Auth;
 
@@ -398,7 +398,7 @@ pub(crate) async fn put(
         let name = krate.name.clone();
 
         // Index into full text index
-        let mut document: TantivyDocument = krate.into();
+        let mut document: FtsDocument = krate.into();
         if let Some(keywords) = metadata.keywords {
             document.add_all_keywords(keywords);
         }

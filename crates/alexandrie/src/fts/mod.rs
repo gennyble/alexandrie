@@ -2,7 +2,7 @@
 mod document;
 mod index;
 
-pub(crate) use document::TantivyDocument;
+pub(crate) use document::FtsDocument;
 pub(crate) use index::Tantivy;
 
 /// Default number of result per page

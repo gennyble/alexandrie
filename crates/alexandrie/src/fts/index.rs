@@ -6,13 +6,14 @@ use diesel::prelude::*;
 use tantivy::collector::{Count, TopDocs};
 use tantivy::directory::MmapDirectory;
 use tantivy::query::{AllQuery, QueryParser};
-use tantivy::schema::{NumericOptions, Schema, TextFieldIndexing, TextOptions};
+use tantivy::schema::{NumericOptions, Schema, TextFieldIndexing, TextOptions, Value};
 use tantivy::tokenizer::{
     Language, LowerCaser, RawTokenizer, SimpleTokenizer, StopWordFilter, TextAnalyzer,
     TokenizerManager,
 };
 use tantivy::{
-    Index as TantivyIndex, IndexReader, IndexWriter, Opstamp, ReloadPolicy, TantivyError, Term,
+    Index as TantivyIndex, IndexReader, IndexWriter, Opstamp, ReloadPolicy, TantivyDocument,
+    TantivyError, Term,
 };
 use tantivy_analysis_contrib::commons::EdgeNgramTokenFilter;
 
@@ -21,7 +22,7 @@ use crate::db::models::Crate;
 use crate::db::schema::*;
 use crate::db::Database;
 use crate::error::Error;
-use crate::fts::TantivyDocument;
+use crate::fts::FtsDocument;
 
 const NUMBER_RESULT_PER_PAGE: i64 = 1000;
 
@@ -147,7 +148,7 @@ impl TryFrom<SearchConfig> for Tantivy {
 
         let index_reader = index
             .reader_builder()
-            .reload_policy(ReloadPolicy::OnCommit)
+            .reload_policy(ReloadPolicy::OnCommitWithDelay)
             .try_into()?;
 
         Ok(Self {
@@ -166,7 +167,7 @@ impl Tantivy {
 
     /// Method that create or update a document in Tantivy index. As there is no update, we need
     /// to first delete the document then create a new document.
-    pub fn create_or_update(&self, document: TantivyDocument) -> Result<(), Error> {
+    pub fn create_or_update(&self, document: FtsDocument) -> Result<(), Error> {
         let id = document.id();
         let document = document.try_into(&self.schema)?;
         let field = self.schema.get_field(super::ID_FIELD_NAME)?;
@@ -225,22 +226,22 @@ impl Tantivy {
 
         tracing::info!("Query : {:?}", query);
 
-        let results = searcher.search(&query, &TopDocs::with_limit(limit))?;
+        let results = searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
 
         tracing::info!("Result : {:?}", results);
 
         let results = results
             .into_iter()
             .map(|(score, doc_address)| {
-                let retrieve_doc = searcher.doc(doc_address).unwrap();
+                let retrieve_doc: TantivyDocument = searcher.doc(doc_address).unwrap();
 
                 let x = retrieve_doc.get_all(name).next();
                 if let Some(n) = x {
                     tracing::info!("Score : {} / Crate : {:?}", score, n);
                 }
-                x.cloned()
+                x.and_then(|i| i.as_str().map(|t| t.to_owned()))
             })
-            .filter_map(|v| v.and_then(|i| i.as_text().map(|t| t.to_owned())))
+            .filter_map(|s| s) // gennyble- This is a hack to flatten the iterator
             .collect();
 
         Ok(results)
@@ -292,13 +293,18 @@ impl Tantivy {
 
         let (count, results) = searcher.search(
             &query,
-            &(Count, TopDocs::with_limit(limit).and_offset(offset)),
+            &(
+                Count,
+                TopDocs::with_limit(limit)
+                    .and_offset(offset)
+                    .order_by_score(),
+            ),
         )?;
 
         let results = results
             .into_iter()
             .filter_map(|(score, doc_address)| {
-                let retrieve_doc = match searcher.doc(doc_address) {
+                let retrieve_doc: TantivyDocument = match searcher.doc(doc_address) {
                     Ok(retrieve_doc) => retrieve_doc,
                     Err(error) => {
                         tracing::warn!("Could not find document {doc_address:?} : {error}");
@@ -391,7 +397,7 @@ impl Tantivy {
                     let id = krate.id;
                     let name = krate.name.clone();
 
-                    let mut doc: TantivyDocument = krate.into();
+                    let mut doc: FtsDocument = krate.into();
 
                     // Skip keywords that might be orphan and add keywords that match ids
                     while let Some((crate_id, keyword)) = current_keyword {
